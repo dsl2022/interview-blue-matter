@@ -1,5 +1,5 @@
 import type { Trial } from './types';
-import { formatPhases } from './mapStudy';
+import { formatPhases, formatStatus } from './mapStudy';
 
 export function TrialsTable({ trials }: { trials: Trial[] }) {
   return (
@@ -28,7 +28,7 @@ export function TrialsTable({ trials }: { trials: Trial[] }) {
             <td>{t.sponsor}</td>
             <td>{formatPhases(t.phases)}</td>
             <td>
-              <span className={`status status-${t.status.toLowerCase()}`}>{t.status.replace(/_/g, ' ')}</span>
+              <span className={`status status-${t.status.toLowerCase()}`}>{formatStatus(t.status)}</span>
             </td>
             <td className="num">{t.enrollment ?? '—'}</td>
           </tr>

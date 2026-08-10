@@ -32,6 +32,22 @@ export function mapStudy(study: RawStudy): Trial {
   };
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  RECRUITING: 'Recruiting',
+  ACTIVE_NOT_RECRUITING: 'Active, not recruiting',
+  NOT_YET_RECRUITING: 'Not yet recruiting',
+  ENROLLING_BY_INVITATION: 'Enrolling by invitation',
+  COMPLETED: 'Completed',
+  TERMINATED: 'Terminated',
+  SUSPENDED: 'Suspended',
+  WITHDRAWN: 'Withdrawn',
+  UNKNOWN: 'Unknown',
+};
+
+export function formatStatus(status: string): string {
+  return STATUS_LABELS[status] ?? status;
+}
+
 export function formatPhases(phases: string[]): string {
   const real = phases.filter((ph) => ph !== 'NA');
   if (real.length === 0) return 'N/A';

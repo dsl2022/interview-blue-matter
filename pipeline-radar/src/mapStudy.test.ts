@@ -1,4 +1,4 @@
-import { mapStudy, formatPhases, type RawStudy } from './mapStudy';
+import { mapStudy, formatPhases, formatStatus, type RawStudy } from './mapStudy';
 import sample from './samples/lung-cancer.json';
 
 describe('mapStudy', () => {
@@ -80,5 +80,16 @@ describe('formatPhases', () => {
 
   it('renders early phase 1', () => {
     expect(formatPhases(['EARLY_PHASE1'])).toBe('Early Phase 1');
+  });
+});
+
+describe('formatStatus', () => {
+  it('humanizes known enums', () => {
+    expect(formatStatus('ACTIVE_NOT_RECRUITING')).toBe('Active, not recruiting');
+    expect(formatStatus('RECRUITING')).toBe('Recruiting');
+  });
+
+  it('passes unknown enums through unchanged', () => {
+    expect(formatStatus('SOME_NEW_STATUS')).toBe('SOME_NEW_STATUS');
   });
 });
