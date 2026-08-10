@@ -147,9 +147,11 @@ GET https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={d
 
 Split: dev 2 owns data + pure logic (A, B); dev 1 owns UI wiring (C). Charts are whoever gets there first.
 
+**Branching:** `feature/milestone-2` cut from `feature/milestone-1-working-search` (don't wait on PR #7); retarget the M2 PR to `main` once #7 merges.
+
 ### A. Data layer — `api.ts`
-- Widen server status filter to `RECRUITING,ACTIVE_NOT_RECRUITING,NOT_YET_RECRUITING,ENROLLING_BY_INVITATION` (fetch must be a superset of what the client-side status filter can show; §5 updated).
-- "Load more": thread `nextPageToken` → `pageToken` (plumbing exists, unused); append pages into one `trials` array; dedupe by `nctId` as a safety net. Keep `pageSize=100`, cap 2–3 pages.
+- Widen server status filter to `RECRUITING,ACTIVE_NOT_RECRUITING,NOT_YET_RECRUITING,ENROLLING_BY_INVITATION` (fetch must be a superset of what the client-side status filter can show; §5 updated). `api.test.ts` pins the exact URL contract — update that assertion **in the same commit**.
+- "Load more": thread `nextPageToken` → `pageToken` (plumbing exists and is already tested — this is pure UI wiring); append pages into one `trials` array; dedupe by `nctId` as a safety net. Keep `pageSize=100`, cap 2–3 pages.
 - In-memory `Map<url, response>` cache — repeat searches instant; same pattern reused for openFDA in M4.
 
 ### B. Derived-data layer — new `summarize.ts` (pure functions, no React)
@@ -157,7 +159,7 @@ Split: dev 2 owns data + pure logic (A, B); dev 1 owns UI wiring (C). Charts are
 - `trialsByPhase(trials)` → ordered `{label, count}[]`, N/A last.
 - `topSponsors(trials, n=8)` → count by exact sponsor string, descending (undercount caveat per §7 stands).
 - `filterTrials(trials, {phases, statuses})` + `sortTrials(trials, key, dir)`; null enrollment always sorts last; phase sorts by rank, not string.
-- Verify: run against `samples/lung-cancer.json`, eyeball expected counts — this is the M2 correctness story.
+- Verify: **Jest tests** (ts-jest harness already in place from M1) — unit cases per function + one pass over the 100-study `lung-cancer.json` fixture with pinned expected counts. This is the M2 correctness story.
 
 ### C. UI — `App.tsx` + components
 - `FiltersBar`: phase + status chip groups, multi-select, "clear"; options derived from fetched data (empty phases → N/A chip).
