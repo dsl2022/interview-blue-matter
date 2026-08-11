@@ -23,7 +23,8 @@ describe('fetchTrials', () => {
     expect(url.searchParams.get('filter.overallStatus')).toBe(
       'RECRUITING,ACTIVE_NOT_RECRUITING,NOT_YET_RECRUITING,ENROLLING_BY_INVITATION',
     );
-    expect(url.searchParams.get('pageSize')).toBe('100');
+    // Bumped 100 → 500 for M3's drug rollup (MILESTONE-3-PLAN step 4).
+    expect(url.searchParams.get('pageSize')).toBe('500');
     expect(url.searchParams.get('countTotal')).toBe('true');
     expect(url.searchParams.get('fields')).toContain('InterventionOtherName');
     expect(url.searchParams.get('pageToken')).toBeNull();

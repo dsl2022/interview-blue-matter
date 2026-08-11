@@ -122,8 +122,8 @@ GET https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={d
 - Most-advanced phase = `phaseRank` in `summarize.ts` (§10-B): max over `NA:0, EARLY_PHASE1:1, PHASE1:2, PHASE2:3, PHASE3:4, PHASE4:5`. API v2 emits `phases` as an **array** (`["PHASE2","PHASE3"]`), never `PHASE1|2` combo strings — that's v1 legacy; do not implement combo entries.
 - Drug landscape filters interventions to `DRUG`/`BIOLOGICAL` only.
 - Placebo/comparator denylist (`placebo`, `saline`, `standard of care`…).
-- Combination arms ("X + chemo"): do **not** string-split; keep as own row, flag as combination.
-- Name-resolution triage order: exact string match → trial `otherNames` union → RxNorm exact → RxNorm fuzzy (score threshold) → **"unresolved" bucket, shown honestly in UI**.
+- ~~Combination arms: do not string-split~~ **SUPERSEDED (M3, measured):** combos ARE split into component drugs, with a category-term guard and an all-category→excluded-bucket fallback — validated on 262 real combo names, see `MILESTONE-3-PLAN.md` + `research/DATA-RESEARCH.md` §2.2. Implemented in `src/drugs/canon.ts` / `cluster.ts`.
+- ~~Name-resolution triage: … → RxNorm fuzzy (score threshold) → …~~ **SUPERSEDED (M3, measured):** fuzzy is BANNED — approximateTerm scores cannot separate correct matches from wrong-drug neighbors (DATA-RESEARCH §3.2). Actual triage: local canon + alias voting (no transitive union-find — it fused 174 drugs) → RxNorm exact with `allsrc=1` → brand-alias retry → **miss = "likely investigational", shown honestly in UI**.
 - Sponsor grouping is exact-string; known to undercount (Merck LLC vs Corp) — acknowledged, not fixed.
 
 **Say at walkthrough, don't build:** server-side cache w/ 24h TTL, nightly pre-resolution job, persisted name→RxCUI table, sponsor-name canonicalization, full pagination.

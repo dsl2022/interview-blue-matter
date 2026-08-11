@@ -250,6 +250,82 @@ th.sortable:hover {
   font-size: 0.7rem;
 }
 
+/* View toggle (Trials | Drugs) */
+.view-toggle {
+  display: inline-flex;
+  margin-bottom: 1rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.view-toggle button {
+  padding: 0.45rem 1.1rem;
+  font-size: 0.9rem;
+  border: none;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+}
+
+.view-toggle button + button {
+  border-left: 1px solid #d1d5db;
+}
+
+.view-toggle button.on {
+  background: #1a56db;
+  color: #fff;
+}
+
+/* Drug landscape table */
+.drug-name {
+  font-weight: 600;
+}
+
+.phase-badge {
+  white-space: nowrap;
+  font-size: 0.8rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.phase-badge.phase-na {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+td.aliases {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #6b7280;
+}
+
+.more {
+  color: #9ca3af;
+  font-size: 0.8rem;
+}
+
+.rx-pending {
+  color: #9ca3af;
+}
+
+.rx-miss {
+  font-size: 0.8rem;
+  color: #92400e;
+  background: #fef3c7;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.drug-note {
+  font-size: 0.85rem;
+}
+
 /* Load more */
 .load-more {
   display: block;

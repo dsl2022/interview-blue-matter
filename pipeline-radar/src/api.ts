@@ -46,7 +46,7 @@ export async function fetchTrials(disease: string, pageToken?: string): Promise<
     const params = new URLSearchParams({
       'query.cond': disease,
       'filter.overallStatus': ACTIVE_STATUSES,
-      pageSize: '100',
+      pageSize: '500', // M3: drug rollup needs volume; research pulled 1000-size pages in seconds
       countTotal: 'true',
       fields: FIELDS,
     });

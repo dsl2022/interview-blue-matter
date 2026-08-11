@@ -1,15 +1,19 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { fetchTrials } from './api';
 import { TrialsTable, type SortState } from './TrialsTable';
 import { FiltersBar, type FilterOption } from './FiltersBar';
 import { SummaryPanel } from './SummaryPanel';
+import { DrugTable } from './DrugTable';
+import { buildDrugLandscape } from './drugs/cluster';
+import { enrichTopRows } from './drugs/rxnorm';
 import { filterTrials, sortTrials, mergeTrials, trialsByPhase, type SortKey } from './summarize';
 import { formatStatus } from './mapStudy';
 import type { Trial } from './types';
 import './App.css';
 
-// §5: cap pagination at 2–3 pages; past that, narrowing with filters is the honest tool.
-const MAX_PAGES = 3;
+// §5's page cap, re-denominated in TRIALS now that pages are 500 (M3 step 4);
+// past this, narrowing with filters is the honest tool.
+const MAX_TRIALS = 1000;
 
 type State =
   | { kind: 'idle' }
@@ -31,6 +35,8 @@ export default function App() {
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
   const [sort, setSort] = useState<SortState | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [view, setView] = useState<'trials' | 'drugs'>('trials');
+  const [rxcuiMap, setRxcuiMap] = useState<ReadonlyMap<string, string | null>>(new Map());
 
   async function search() {
     const disease = query.trim();
@@ -95,6 +101,24 @@ export default function App() {
     () => (sort ? sortTrials(filtered, sort.key, sort.dir) : filtered),
     [filtered, sort],
   );
+
+  // Milestone 3: drug rollup is pure + derived — respects the active filters, no async.
+  const landscape = useMemo(() => buildDrugLandscape(filtered), [filtered]);
+
+  // RxNorm enrichment streams in for the top rows only when the drug view is open.
+  // Module-level cache makes re-runs (toggle, filter change) free for known names.
+  useEffect(() => {
+    if (view !== 'drugs' || landscape.drugs.length === 0) return;
+    let cancelled = false;
+    enrichTopRows(
+      landscape.drugs,
+      (key, cui) => setRxcuiMap((prev) => new Map(prev).set(key, cui)),
+      { isCancelled: () => cancelled },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [view, landscape]);
 
   // Filter chips are derived from the FETCHED set (with counts), never hardcoded.
   const phaseOptions: FilterOption[] = useMemo(
@@ -164,18 +188,40 @@ export default function App() {
             <strong>{state.total.toLocaleString()}</strong> active trials for “{state.disease}”
           </p>
 
-          <SummaryPanel trials={filtered} />
+          <div className="view-toggle">
+            <button type="button" className={view === 'trials' ? 'on' : ''} onClick={() => setView('trials')}>
+              Trials ({visible.length})
+            </button>
+            <button type="button" className={view === 'drugs' ? 'on' : ''} onClick={() => setView('drugs')}>
+              Drugs ({landscape.drugs.length})
+            </button>
+          </div>
 
-          <TrialsTable trials={visible} sort={sort} onSort={onSort} />
+          {view === 'trials' ? (
+            <>
+              <SummaryPanel trials={filtered} />
+              <TrialsTable trials={visible} sort={sort} onSort={onSort} />
+            </>
+          ) : (
+            <>
+              <p className="info drug-note">
+                One row per unique drug, rolled up from {filtered.length} loaded trials.
+                {landscape.excludedCount > 0 && (
+                  <> Excluded: {landscape.excludedCount} non-drug / unspecified interventions.</>
+                )}
+              </p>
+              <DrugTable drugs={landscape.drugs} rxcuiMap={rxcuiMap} />
+            </>
+          )}
 
-          {state.nextPageToken && state.pages < MAX_PAGES && (
+          {state.nextPageToken && state.trials.length < MAX_TRIALS && (
             <button type="button" className="load-more" onClick={loadMore} disabled={loadingMore}>
-              {loadingMore ? 'Loading…' : 'Load 100 more'}
+              {loadingMore ? 'Loading…' : 'Load more trials'}
             </button>
           )}
-          {state.nextPageToken && state.pages >= MAX_PAGES && (
+          {state.nextPageToken && state.trials.length >= MAX_TRIALS && (
             <p className="info page-cap">
-              Page cap reached — first {allTrials.length} trials fetched of {state.total.toLocaleString()}.
+              Trial cap reached — first {allTrials.length} trials fetched of {state.total.toLocaleString()}.
               Narrow with filters or a more specific disease.
             </p>
           )}
