@@ -142,3 +142,35 @@ Golden assertions (all verified true in this corpus — use as unit tests):
 - openFDA: `pembrolizumab` hits generic_name; `Keytruda` only brand_name; `ivonescimab` 404 ⇒ Investigational.
 
 Failure-mode talking points (measured, citable in demo): 174-drug mega-cluster from naive union-find; carboplatin key hijack without count guard; BMS-986340→BMS-830216 wrong-drug fuzzy match; 25% of trials have no phase field.
+
+---
+
+## 6. MILESTONE 4 DEEP-DIVE (measured 2026-08-11; script `research/openfda-m4.mjs`, results `research/fixtures/openfda-m4-report.json`)
+
+### 6.1 RxCUI join — TESTED AND REJECTED
+`drugsfda` records DO carry `openfda.rxcui`, but it holds PRODUCT-level CUIs only (Keytruda record: `[1657746, 1657749, 1657750, 1657751]`), never the INGREDIENT-level CUI that M3's rxnorm.ts resolves (pembrolizumab = 1547545). All 9 ingredient-CUI searches (`openfda.rxcui:"<cui>"`) returned 404, including for definitively approved drugs. Bridging ingredient→product CUIs via RxNav `/rxcui/{cui}/related` would add a call chain for zero gain over name batching (§6.2). **The M3→M4 join is name-based, full stop**: canon displayName → generic_name; brandish aliases → brand_name.
+
+### 6.2 BATCHING — the rate-limit solution (verified)
+`search=openfda.generic_name:("pembrolizumab" "osimertinib" "durvalumab")&limit=100` → HTTP 200, all 4 applications in ONE call. Space-separated quoted list inside parens = OR. Same syntax verified for `openfda.brand_name:("keytruda" "tagrisso" "lorbrena")`.
+- Batching by rxcui returned 404 for every syntax variant (consistent with §6.1).
+- **Badge strategy: 2 calls per batch of ~15 rows** — round 1: generic batch of canon display names; round 2: brand batch of brandish aliases for round-1 misses. 372 lung-cancer rows ≈ 25–30 calls total vs 1,000/day. Chunk at ~15 names/call (URL length safety); `limit=100` (one generic can own many applications, §6.3).
+- **TRUNCATION (measured 2026-08-13): the realistic top-15 lung-cancer chunk returns 115 applications — OVER limit=100 on the first batch of the demo search** (paclitaxel alone: 14 applications; gemcitabine: 15; carboplatin: 9). openFDA truncates silently. Absence from a response only means MISS when `meta.results.total <= results.length`; otherwise paginate with `skip` (supported) until complete before judging absences — else approved chemo generics get badged Investigational.
+- **Correlation back to rows**: result `openfda.generic_name`/`brand_name` values are UPPERCASE arrays. Match by case-insensitive equality of ANY array entry against the queried name. Brand round needs exact-match-first: querying `keytruda` also returns brand `KEYTRUDA QLEX` — a DIFFERENT product (generic `PEMBROLIZUMAB AND BERAHYALURONIDASE ALFA-PMPH`). Never prefix-match brands.
+
+### 6.3 One generic ≠ one application — selection rule
+- carboplatin → **9 applications** (8 ANDA generics + 1 NDA). nivolumab → OPDIVO + OPDIVO QVANTIG + **OPDUALAG** (the nivolumab+relatlimab combo). pembrolizumab → 2 BLAs (original 125514 + 2025 subcutaneous 761467).
+- **Rule**: group results per matched name; the drug's card uses the application with the EARLIEST ORIG/AP submission date; keep `appCount` for display ("9 applications").
+- Approval date = `submissions[]` where `submission_type=="ORIG" && submission_status=="AP"` → `submission_status_date` (string `YYYYMMDD`). Verified correct: pembrolizumab `20140904`, osimertinib `20151113`, durvalumab `20170501`.
+- **Old-generic caveat (measured)**: submissions history is TRUNCATED for old drugs — carboplatin's earliest ORIG/AP in the API is `20041014`, real approval 1989. Display rule: NDA/BLA with ORIG/AP → "Approved <year>"; ANDA-only or suspiciously-late earliest date on a known-old generic → "Approved (records since <year>)". Never present the earliest ANDA date as THE approval date.
+- Free bonus fields in the same response: `openfda.pharm_class_epc` (e.g. "Programmed Death Receptor-1 Blocking Antibody [EPC]"), `sponsor_name`, `products[].marketing_status` ("Prescription"/"Discontinued"), full `openfda.brand_name` list.
+
+### 6.4 Adverse events endpoint (drill-in)
+- `GET /drug/event.json?search=patient.drug.openfda.generic_name:"<name>"&count=patient.reaction.reactionmeddrapt.exact` → `results: [{term, count}]` sorted desc. Osimertinib top-5: DEATH 11,462; MALIGNANT NEOPLASM PROGRESSION 3,354; DIARRHOEA 1,677; DRUG RESISTANCE 1,096; FATIGUE 1,037.
+- **UI caveat is mandatory**: FAERS reactions include disease outcomes (DEATH, PROGRESSION) — reports, not causation. And reporting is serious-biased: osimertinib 29,795 of 31,866 reports (93%) flagged `serious:1`.
+- AND syntax trap (hit it live): `+AND+` must keep literal `+` in the query string — `encodeURIComponent` over the whole query encodes `+`→`%2B` and silently returns 0 results. Encode values, not the boolean glue.
+- One count-call per drill-in, on demand, cached — never eager.
+
+### 6.5 Transport facts
+- CORS: `access-control-allow-origin: *` on api.fda.gov (measured) — browser-direct works, no proxy.
+- Miss = HTTP 404 `{"error":{"code":"NOT_FOUND"}}` (unchanged from §4). Post-normalization 404 on BOTH batch rounds ⇒ "Investigational". Network/5xx error ⇒ UNKNOWN (no badge), never cached, never conflated with a 404 miss.
+- Cache badge results in localStorage with ~24h TTL (approvals change slowly; FAERS counts drift but the drill-in is per-click anyway).
