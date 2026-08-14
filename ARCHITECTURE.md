@@ -21,7 +21,7 @@
 2. **Make it useful** — filters, sorting, pagination, summary + chart
 3. **One drug, one row** — collapse trials to a drug-level landscape (the hard one)
 4. **Approved vs Investigational** — openFDA badge + detail
-5. **Consultant deliverable** — export + watchlist diff
+5. **Consultant deliverable** — export + watchlist diff → see `MILESTONE-5-PLAN.md` (Markdown export from `report.ts`, unfiltered-landscape snapshots + pure differ in `watchlist.ts`)
 6. **Stretch** — PubMed counts / caching / LLM narrative
 
 ## 3. Code layout

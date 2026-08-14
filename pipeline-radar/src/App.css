@@ -436,3 +436,110 @@ tr.expansion-row td {
   color: #92400e;
   font-size: 0.78rem;
 }
+
+/* Milestone 5: export bar + watchlist diff panel */
+.export-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.export-bar button {
+  font-size: 0.85rem;
+  padding: 0.35rem 0.9rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+}
+
+.export-bar button:hover {
+  border-color: #1a56db;
+  color: #1a56db;
+}
+
+.export-bar button.save-watchlist {
+  border-color: #1a56db;
+  color: #1a56db;
+}
+
+.export-pending {
+  font-size: 0.78rem;
+  color: #9ca3af;
+}
+
+.diff-panel {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.88rem;
+}
+
+.diff-header {
+  margin: 0 0 0.4rem;
+  font-weight: 600;
+}
+
+.diff-caveat {
+  margin: 0 0 0.4rem;
+  color: #92400e;
+  background: #fef3c7;
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+.diff-none {
+  margin: 0;
+  color: #374151;
+}
+
+.diff-section {
+  margin: 0.25rem 0;
+}
+
+.diff-section summary {
+  cursor: pointer;
+  color: #1e40af;
+}
+
+.diff-section.muted summary {
+  color: #6b7280;
+}
+
+.diff-section ul {
+  margin: 0.3rem 0 0.5rem;
+  padding-left: 1.4rem;
+}
+
+.diff-section li {
+  margin-bottom: 0.2rem;
+}
+
+/* Milestone 5 (cut-line extra): browser print → PDF is the client handoff.
+   Hide the app chrome; the info line + drug table are the deliverable. */
+@media print {
+  .search,
+  .filters,
+  .view-toggle,
+  .load-more,
+  .export-bar,
+  .ae-toggle,
+  .diff-panel {
+    display: none !important;
+  }
+
+  th {
+    position: static; /* sticky headers repeat oddly across printed pages */
+  }
+
+  main {
+    max-width: none;
+    padding: 0;
+  }
+}

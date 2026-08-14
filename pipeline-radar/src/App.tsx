@@ -7,8 +7,12 @@ import { DrugTable } from './DrugTable';
 import { buildDrugLandscape } from './drugs/cluster';
 import { enrichTopRows } from './drugs/rxnorm';
 import { badgeDrugs, type FdaBadge } from './drugs/openfda';
-import { filterTrials, sortTrials, mergeTrials, trialsByPhase, type SortKey } from './summarize';
+import { filterTrials, sortTrials, mergeTrials, trialsByPhase, PHASE_LABELS, type SortKey } from './summarize';
 import { formatStatus } from './mapStudy';
+import { buildMarkdownReport, reportFilename } from './report';
+import { diffSnapshots, loadSnapshot, makeSnapshot, saveSnapshot, type Snapshot } from './watchlist';
+import { ExportBar } from './ExportBar';
+import { WatchlistDiff } from './WatchlistDiff';
 import type { Trial } from './types';
 import './App.css';
 
@@ -39,6 +43,9 @@ export default function App() {
   const [view, setView] = useState<'trials' | 'drugs'>('trials');
   const [rxcuiMap, setRxcuiMap] = useState<ReadonlyMap<string, string | null>>(new Map());
   const [fdaMap, setFdaMap] = useState<ReadonlyMap<string, FdaBadge | null>>(new Map());
+  // Last-saved watchlist snapshot for the current disease. localStorage isn't
+  // reactive, so the loaded snapshot lives in state: refreshed on search, on save.
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
 
   async function search() {
     const disease = query.trim();
@@ -57,6 +64,7 @@ export default function App() {
         nextPageToken: result.nextPageToken,
         pages: 1,
       });
+      setSnapshot(loadSnapshot(disease));
     } catch (err) {
       setState({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
     }
@@ -107,10 +115,18 @@ export default function App() {
   // Milestone 3: drug rollup is pure + derived — respects the active filters, no async.
   const landscape = useMemo(() => buildDrugLandscape(filtered), [filtered]);
 
+  // Milestone 5: the watchlist snapshots the UNFILTERED landscape — a watchlist
+  // tracks the disease, filters are a viewing lens (diffing the filtered view
+  // would report every filter click as pipeline churn).
+  const unfilteredLandscape = useMemo(() => buildDrugLandscape(allTrials), [allTrials]);
+
   // Enrichment streams in only while the drug view is open: RxNorm for the top
   // rows, FDA badges for ALL rows (batching makes full coverage affordable —
   // ~2 calls per 15 rows, DATA-RESEARCH §6.2). Module-level caches make
   // re-runs (toggle, filter change) free for known names.
+  // FDA badges cover the unfiltered set (the snapshot needs it) plus any
+  // filtered-view rows whose cluster key shifted under alias voting — one call,
+  // so the canon-name cache is never raced by a concurrent duplicate.
   useEffect(() => {
     if (view !== 'drugs' || landscape.drugs.length === 0) return;
     let cancelled = false;
@@ -119,15 +135,41 @@ export default function App() {
       (key, cui) => setRxcuiMap((prev) => new Map(prev).set(key, cui)),
       { isCancelled: () => cancelled },
     );
+    const unfilteredKeys = new Set(unfilteredLandscape.drugs.map((d) => d.key));
     badgeDrugs(
-      landscape.drugs,
+      [...unfilteredLandscape.drugs, ...landscape.drugs.filter((d) => !unfilteredKeys.has(d.key))],
       (key, badge) => setFdaMap((prev) => new Map(prev).set(key, badge)),
       { isCancelled: () => cancelled },
     );
     return () => {
       cancelled = true;
     };
-  }, [view, landscape]);
+  }, [view, landscape, unfilteredLandscape]);
+
+  // Watchlist diff: recomputes as badges stream in — safe because 'unknown'
+  // never produces a false flip (watchlist.ts invariant).
+  const watchDiff = useMemo(() => {
+    if (!snapshot || state.kind !== 'results') return null;
+    const current = makeSnapshot(unfilteredLandscape, fdaMap, {
+      disease: state.disease,
+      savedAt: 0, // irrelevant to the diff
+      fetchedTrials: state.trials.length,
+      totalTrials: state.total,
+    });
+    return diffSnapshots(snapshot, current);
+  }, [snapshot, unfilteredLandscape, fdaMap, state]);
+
+  function saveWatchlist() {
+    if (state.kind !== 'results') return;
+    const fresh = makeSnapshot(unfilteredLandscape, fdaMap, {
+      disease: state.disease,
+      savedAt: Date.now(),
+      fetchedTrials: state.trials.length,
+      totalTrials: state.total,
+    });
+    saveSnapshot(fresh);
+    setSnapshot(fresh); // panel now diffs empty against itself → "No changes"
+  }
 
   // Filter chips are derived from the FETCHED set (with counts), never hardcoded.
   const phaseOptions: FilterOption[] = useMemo(
@@ -219,6 +261,26 @@ export default function App() {
                   <> Excluded: {landscape.excludedCount} non-drug / unspecified interventions.</>
                 )}
               </p>
+              <ExportBar
+                buildReport={() =>
+                  buildMarkdownReport(landscape, fdaMap, rxcuiMap, {
+                    disease: state.disease,
+                    generatedAt: new Date(),
+                    totalTrials: state.total,
+                    fetchedTrials: allTrials.length,
+                    filteredTrials: filtered.length,
+                    filters: {
+                      phases: selectedPhases.map((p) => PHASE_LABELS[p] ?? p),
+                      statuses: selectedStatuses.map(formatStatus),
+                    },
+                    phaseBuckets: trialsByPhase(filtered),
+                  })
+                }
+                filename={() => reportFilename(state.disease, new Date())}
+                onSaveWatchlist={saveWatchlist}
+                pendingCount={landscape.drugs.filter((d) => !fdaMap.has(d.key)).length}
+              />
+              {snapshot && watchDiff && <WatchlistDiff snapshot={snapshot} diff={watchDiff} />}
               <DrugTable drugs={landscape.drugs} rxcuiMap={rxcuiMap} fdaMap={fdaMap} />
             </>
           )}
