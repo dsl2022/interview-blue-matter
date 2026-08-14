@@ -6,6 +6,7 @@ import { SummaryPanel } from './SummaryPanel';
 import { DrugTable } from './DrugTable';
 import { buildDrugLandscape } from './drugs/cluster';
 import { enrichTopRows } from './drugs/rxnorm';
+import { badgeDrugs, type FdaBadge } from './drugs/openfda';
 import { filterTrials, sortTrials, mergeTrials, trialsByPhase, type SortKey } from './summarize';
 import { formatStatus } from './mapStudy';
 import type { Trial } from './types';
@@ -37,6 +38,7 @@ export default function App() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [view, setView] = useState<'trials' | 'drugs'>('trials');
   const [rxcuiMap, setRxcuiMap] = useState<ReadonlyMap<string, string | null>>(new Map());
+  const [fdaMap, setFdaMap] = useState<ReadonlyMap<string, FdaBadge | null>>(new Map());
 
   async function search() {
     const disease = query.trim();
@@ -105,14 +107,21 @@ export default function App() {
   // Milestone 3: drug rollup is pure + derived — respects the active filters, no async.
   const landscape = useMemo(() => buildDrugLandscape(filtered), [filtered]);
 
-  // RxNorm enrichment streams in for the top rows only when the drug view is open.
-  // Module-level cache makes re-runs (toggle, filter change) free for known names.
+  // Enrichment streams in only while the drug view is open: RxNorm for the top
+  // rows, FDA badges for ALL rows (batching makes full coverage affordable —
+  // ~2 calls per 15 rows, DATA-RESEARCH §6.2). Module-level caches make
+  // re-runs (toggle, filter change) free for known names.
   useEffect(() => {
     if (view !== 'drugs' || landscape.drugs.length === 0) return;
     let cancelled = false;
     enrichTopRows(
       landscape.drugs,
       (key, cui) => setRxcuiMap((prev) => new Map(prev).set(key, cui)),
+      { isCancelled: () => cancelled },
+    );
+    badgeDrugs(
+      landscape.drugs,
+      (key, badge) => setFdaMap((prev) => new Map(prev).set(key, badge)),
       { isCancelled: () => cancelled },
     );
     return () => {
@@ -210,7 +219,7 @@ export default function App() {
                   <> Excluded: {landscape.excludedCount} non-drug / unspecified interventions.</>
                 )}
               </p>
-              <DrugTable drugs={landscape.drugs} rxcuiMap={rxcuiMap} />
+              <DrugTable drugs={landscape.drugs} rxcuiMap={rxcuiMap} fdaMap={fdaMap} />
             </>
           )}
 

@@ -101,7 +101,7 @@ Rules measured in §3 — do not improvise:
 
 ## Step 6 — stretch (only if time)
 
-Expandable row → member trial NCT links; alias-source tooltip; wire the M4 openFDA badge using §4 fallback chain (generic_name → brand_name → 404 = Investigational).
+Expandable row → member trial NCT links; alias-source tooltip; the openFDA badge is now specified in MILESTONE-4-PLAN.md (batched generic→brand rounds with a truncation guard — supersedes the §4 per-name fallback chain sketched here).
 
 ## Deliberate non-goals (say them out loud, cite measurements)
 

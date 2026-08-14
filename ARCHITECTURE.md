@@ -89,8 +89,8 @@ GET https://rxnav.nlm.nih.gov/REST/approximateTerm.json?term={name}&maxEntries=3
 
 ### openFDA (milestone 4)
 ```
-GET https://api.fda.gov/drug/drugsfda.json?search=openfda.generic_name:"{drug}"&limit=5   ← approval badge
-GET https://api.fda.gov/drug/event.json?search=patient.drug.openfda.generic_name:"{drug}"&count=patient.reaction.reactionmeddrapt.exact  ← side effects
+GET https://api.fda.gov/drug/drugsfda.json?search=openfda.generic_name:("n1" "n2" …)&limit=100[&skip=100…]  ← approval badges, BATCHED (~15 names/call, paginated past 100 results — see MILESTONE-4-PLAN)
+GET https://api.fda.gov/drug/event.json?search=patient.drug.openfda.generic_name:"{drug}"&count=patient.reaction.reactionmeddrapt.exact  ← side effects (on-demand drill-in)
 ```
 
 ### PubMed (stretch)
@@ -101,7 +101,7 @@ GET https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={d
 ### Rate limits
 | API | Limit | Mitigation |
 |---|---|---|
-| openFDA | 240/min, **1,000/day per IP** | cache by name (memory + localStorage); badge lazily (visible rows only); dedupe first |
+| openFDA | 240/min, **1,000/day per IP** | batched OR queries (~15 names/call) + 24h localStorage cache — full-row coverage in ~25 calls; supersedes the earlier "badge lazily (visible rows only)" plan |
 | PubMed | ~3/sec | concurrency limit |
 | CT.gov, RxNorm | none published | concurrency limit 4–6, no `Promise.all` bursts |
 
