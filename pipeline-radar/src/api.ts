@@ -2,7 +2,10 @@ import { mapStudy, type RawStudy } from './mapStudy';
 import type { SearchResult } from './types';
 import sampleLungCancer from './samples/lung-cancer.json';
 
-const BASE = 'https://clinicaltrials.gov/api/v2/studies';
+// Relative /api base: the proxy service (api/) forwards to clinicaltrials.gov.
+// Locally Vite's dev proxy does the same forwarding (vite.config.ts); in prod
+// it's one CloudFront distribution routing /api/* to the ALB (CICD-PLAN.md).
+const BASE = '/api/ctgov/v2/studies';
 
 // Offline parachute: flip to true to serve the saved sample instead of the live API.
 const USE_SAMPLES = false;

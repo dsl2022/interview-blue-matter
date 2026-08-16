@@ -45,7 +45,9 @@ export function fdaStatusOf(key: string, fdaMap: ReadonlyMap<string, FdaBadge | 
   return fdaMap.get(key) ? 'approved' : 'investigational';
 }
 
-const BASE = 'https://api.fda.gov/drug';
+// Relative /api base — see api.ts; the proxy also pools openFDA's 1k/day
+// per-IP quota behind a shared server-side cache.
+const BASE = '/api/openfda/drug';
 const TTL_MS = 24 * 60 * 60 * 1000;
 
 const mem = new Map<string, FdaBadge | null>();

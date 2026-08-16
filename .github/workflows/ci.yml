@@ -1,0 +1,62 @@
+# CI gate: runs on every PR, and is reused verbatim by deploy.yml
+# (workflow_call) so main deploys through exactly the checks PRs see.
+name: ci
+
+on:
+  pull_request:
+  workflow_call:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pipeline-radar
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: pipeline-radar/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build # tsc -b && vite build
+
+  api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - name: docker build (build only, no push)
+        run: docker build -t pipeline-radar-api .
+
+  cdk-synth:
+    # Catches infra errors pre-merge. Needs the frontend dist/ because the
+    # web stack's BucketDeployment reads it at synth time.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            pipeline-radar/package-lock.json
+            cdk/package-lock.json
+      - name: Build frontend
+        working-directory: pipeline-radar
+        run: npm ci && npm run build
+      - name: Synth
+        working-directory: cdk
+        run: npm ci && npm run build && npx cdk synth --all --quiet

@@ -1,5 +1,13 @@
 # Pipeline Radar — AWS CI/CD Plan (CDK + GitHub OIDC + S3/CloudFront + ECS Fargate)
 
+> **Status (2026-08-16, branch `feature/aws-cicd`):** steps 1, 2, 4 and 5 are
+> implemented — `api/` proxy (8 jest tests, verified end-to-end locally through
+> the Vite dev proxy against the live registry), `cdk/` (3 stacks, `synth`
+> clean with no AWS creds), `ci.yml` + `deploy.yml`. Remaining: step 3, the
+> one-time manual bootstrap — `cdk bootstrap`, deploy `PipelineRadarGithubOidc`,
+> set the output ARN as the `AWS_DEPLOY_ROLE_ARN` repo variable, first manual
+> `cdk deploy --all` — and merging the milestone branches into `main`.
+
 ## Target architecture
 
 ```

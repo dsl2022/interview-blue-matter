@@ -9,7 +9,8 @@ import type { DrugRow } from './cluster';
 // - A miss (HTTP 200, empty idGroup) is SIGNAL: likely investigational. null means
 //   exactly that; errors are never cached and never become null.
 
-const BASE = 'https://rxnav.nlm.nih.gov/REST/rxcui.json';
+// Relative /api base — see api.ts for the proxy routing story.
+const BASE = '/api/rxnorm/rxcui.json';
 
 const mem = new Map<string, string | null>();
 

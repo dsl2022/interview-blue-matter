@@ -16,8 +16,9 @@ describe('fetchTrials', () => {
     const spy = mockFetchOnce({ studies: [], totalCount: 0 });
     await fetchTrials('lung cancer');
 
-    const url = new URL(spy.mock.calls[0][0] as string);
-    expect(url.origin + url.pathname).toBe('https://clinicaltrials.gov/api/v2/studies');
+    // Relative /api URL — resolved against the page origin in the browser.
+    const url = new URL(spy.mock.calls[0][0] as string, 'http://localhost');
+    expect(url.pathname).toBe('/api/ctgov/v2/studies');
     expect(url.searchParams.get('query.cond')).toBe('lung cancer');
     // Widened in M2 (issue #8): superset of the client-side status filter, per ARCHITECTURE §5.
     expect(url.searchParams.get('filter.overallStatus')).toBe(
@@ -34,7 +35,7 @@ describe('fetchTrials', () => {
     const spy = mockFetchOnce({ studies: [], totalCount: 0 });
     await fetchTrials('lung cancer', 'abc123');
 
-    const url = new URL(spy.mock.calls[0][0] as string);
+    const url = new URL(spy.mock.calls[0][0] as string, 'http://localhost');
     expect(url.searchParams.get('pageToken')).toBe('abc123');
   });
 
