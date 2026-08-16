@@ -4,6 +4,7 @@ AUDIENCE: coding agent implementing Milestone 5 in `pipeline-radar/` during the 
 Brief (PDF): one-click export of a clean landscape summary a consultant could put in front of a client; save a search as a watchlist; on re-run, show what changed since last time.
 Decisions locked with the user (2026-08-14): **Markdown export first** (download + clipboard), print-ready view behind the cut line; **one snapshot per disease** (save overwrites, diff vs last save); **drug-level diff + trial deltas** (per-drug new-NCT lists).
 Reviewed 2026-08-14; review fixes folded in: three-number scope line (fetched vs filtered vs total), **watchlist snapshots/diffs the UNFILTERED landscape** (filters are a viewing lens; the watchlist tracks the disease), diff panel lives inside the drugs view only (badges only stream there), greedy one-to-one rename matching, snapshot held in React state, `rxcuiMap` actually used in the report.
+PR #11 review (2026-08-16) folded in: badge pass guarded/keyed on the unfiltered landscape (split effects; zero-yield filters can no longer suppress it), full snapshot-shape validation on load, `fdaReversed` diff bucket (approved→investigational is never swallowed), pending counter spans unfiltered ∪ filtered, one clock per export (local dates, filename = body date), PDF WinAnsi transliteration + visible PDF failure state, cross-format sentences and the three-way FDA classification each own one helper.
 
 ## Definition of done
 

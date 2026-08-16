@@ -1,5 +1,5 @@
 import type { Landscape, DrugRow } from './drugs/cluster';
-import type { FdaBadge } from './drugs/openfda';
+import { fdaStatusOf, type FdaBadge, type FdaStatus } from './drugs/openfda';
 import type { PhaseBucket } from './summarize';
 import type { Trial } from './types';
 import { formatPhases, formatStatus } from './mapStudy';
@@ -35,18 +35,28 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+// Local calendar date (yyyy-mm-dd). NEVER toISOString here: that stamps the UTC
+// day, and a consultant exporting in the evening west of UTC would get a report
+// dated tomorrow — a provenance error on the exact line built for honesty.
+export function localDateStamp(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 // Mirrors DrugTable's FdaChip + the RxNorm hint: absent key = pending, never a
 // verdict; pending + definitive RxNorm miss keeps the likely-investigational hint.
+// Classification goes through fdaStatusOf — the single owner of the three-way rule.
 export function fdaCellText(
   key: string,
   fdaMap: ReadonlyMap<string, FdaBadge | null>,
   rxcuiMap: ReadonlyMap<string, string | null>,
 ): string {
-  if (!fdaMap.has(key)) {
+  const status = fdaStatusOf(key, fdaMap);
+  if (status === 'unknown') {
     return rxcuiMap.get(key) === null ? '— (not in RxNorm · likely investigational)' : '—';
   }
-  const badge = fdaMap.get(key);
-  if (!badge) return 'Investigational';
+  if (status === 'investigational') return 'Investigational';
+  const badge = fdaMap.get(key)!;
   if (!badge.approvalYear) return 'Approved';
   return badge.approvalApprox
     ? `Approved · records since ${badge.approvalYear}`
@@ -59,8 +69,9 @@ export function fdaSummary(landscape: Landscape, fdaMap: ReadonlyMap<string, Fda
   let investigational = 0;
   let pending = 0;
   for (const d of landscape.drugs) {
-    if (!fdaMap.has(d.key)) pending++;
-    else if (fdaMap.get(d.key)) approved++;
+    const status = fdaStatusOf(d.key, fdaMap);
+    if (status === 'unknown') pending++;
+    else if (status === 'approved') approved++;
     else investigational++;
   }
   return { approved, investigational, pending };
@@ -71,6 +82,7 @@ export interface DrugRowCells {
   phase: string;
   trials: number;
   fda: string;
+  fdaStatus: FdaStatus; // structured category — renderers style from THIS, never by sniffing `fda`
   sponsor: string;
   aliases: string;
 }
@@ -95,6 +107,7 @@ export function drugRowCells(
     phase: d.phaseLabel,
     trials: d.trialCount,
     fda: fdaCellText(d.key, fdaMap, rxcuiMap),
+    fdaStatus: fdaStatusOf(d.key, fdaMap),
     sponsor,
     aliases,
   };
@@ -127,6 +140,48 @@ export function scopeSentence(
     : `Scope: based on ${loaded}.`;
 }
 
+// ---- Cross-format sentences ----
+// Every line that must read IDENTICALLY in .md, .html and .pdf is built here
+// once (same pattern as scopeSentence). Renderers pass their own emphasis
+// wrapper / escaper; they never rebuild the wording.
+
+const identity = (s: string) => s;
+
+export function reportTitle(meta: ReportMeta, kind: ReportKind = 'landscape'): string {
+  return `Pipeline Radar — ${capitalize(meta.disease)} ${
+    kind === 'trials' ? 'active clinical trials' : 'development landscape'
+  }`;
+}
+
+export function generatedLine(meta: ReportMeta, kind: ReportKind = 'landscape'): string {
+  const sources =
+    kind === 'trials'
+      ? 'ClinicalTrials.gov public data'
+      : 'ClinicalTrials.gov, RxNorm and FDA (drugs@fda) public data';
+  return `Generated ${localDateStamp(meta.generatedAt)} from ${sources}.`;
+}
+
+export function phaseBucketsLine(meta: ReportMeta, escText: (s: string) => string = identity): string | null {
+  if (meta.phaseBuckets.length === 0) return null;
+  return `Trials by phase: ${meta.phaseBuckets.map((b) => `${escText(b.label)}: ${b.count}`).join(' · ')}.`;
+}
+
+export function statsLine(
+  landscape: Landscape,
+  fdaMap: ReadonlyMap<string, FdaBadge | null>,
+  strong: (s: string) => string = identity,
+): string {
+  const stats = fdaSummary(landscape, fdaMap);
+  const counts = [`${strong(String(stats.approved))} FDA-approved`, `${strong(String(stats.investigational))} investigational`];
+  if (stats.pending > 0) counts.push(`${strong(String(stats.pending))} pending verification`);
+  return `${strong(`${landscape.drugs.length} unique drugs`)} — ${counts.join(', ')}.`;
+}
+
+export function excludedLine(landscape: Landscape): string | null {
+  if (landscape.excludedCount === 0) return null;
+  return `${landscape.excludedCount} non-drug / unspecified intervention mentions excluded from the drug rollup.`;
+}
+
 export const TABLE_HEADERS = ['Drug', 'Highest phase', 'Trials', 'FDA status', 'Lead sponsor', 'Also known as'];
 
 export const METHODOLOGY =
@@ -140,26 +195,22 @@ export function buildMarkdownReport(
 ): string {
   const lines: string[] = [];
   const pipe = (s: string) => s.replace(/\|/g, '\\|');
+  const bold = (s: string) => `**${s}**`;
 
-  lines.push(`# Pipeline Radar — ${capitalize(meta.disease)} development landscape`);
+  lines.push(`# ${reportTitle(meta)}`);
   lines.push('');
-  lines.push(`Generated ${meta.generatedAt.toISOString().slice(0, 10)} from ClinicalTrials.gov, RxNorm and FDA (drugs@fda) public data.`);
+  lines.push(generatedLine(meta));
   lines.push('');
 
   // Scope line — three numbers when filters are active, never filtered-as-loaded.
-  lines.push(scopeSentence(meta, (s) => `**${s}**`));
-  if (landscape.excludedCount > 0) {
-    lines.push(`${landscape.excludedCount} non-drug / unspecified intervention mentions excluded from the drug rollup.`);
-  }
+  lines.push(scopeSentence(meta, bold));
+  const excluded = excludedLine(landscape);
+  if (excluded) lines.push(excluded);
   lines.push('');
 
-  const stats = fdaSummary(landscape, fdaMap);
-  const counts = [`**${stats.approved}** FDA-approved`, `**${stats.investigational}** investigational`];
-  if (stats.pending > 0) counts.push(`**${stats.pending}** pending verification`);
-  lines.push(`**${landscape.drugs.length} unique drugs** — ${counts.join(', ')}.`);
-  if (meta.phaseBuckets.length > 0) {
-    lines.push(`Trials by phase: ${meta.phaseBuckets.map((b) => `${b.label}: ${b.count}`).join(' · ')}.`);
-  }
+  lines.push(statsLine(landscape, fdaMap, bold));
+  const phases = phaseBucketsLine(meta);
+  if (phases) lines.push(phases);
   lines.push('');
 
   // The landscape table.
@@ -230,34 +281,32 @@ export function buildHtmlReport(
   meta: ReportMeta,
 ): string {
   const esc = escapeHtml;
+  const strong = (s: string) => `<strong>${s}</strong>`;
 
-  const title = `Pipeline Radar — ${capitalize(meta.disease)} development landscape`;
+  const title = reportTitle(meta);
+  const scope = scopeSentence(meta, strong, esc);
+  const excluded = excludedLine(landscape);
+  const phases = phaseBucketsLine(meta, esc);
 
-  const scope = scopeSentence(meta, (s) => `<strong>${s}</strong>`, esc);
-
-  const stats = fdaSummary(landscape, fdaMap);
-  const counts = [`<strong>${stats.approved}</strong> FDA-approved`, `<strong>${stats.investigational}</strong> investigational`];
-  if (stats.pending > 0) counts.push(`<strong>${stats.pending}</strong> pending verification`);
-
-  const fdaChip = (fda: string) => {
-    const cls = fda.startsWith('Approved') ? 'approved' : fda === 'Investigational' ? 'inv' : 'pending';
-    return `<span class="chip ${cls}">${esc(fda)}</span>`;
-  };
+  // Chip class comes from the structured status — NEVER sniffed back out of the
+  // display text, which rewording or localization would silently misclassify.
+  const CHIP_CLASS: Record<FdaStatus, string> = { approved: 'approved', investigational: 'inv', unknown: 'pending' };
+  const fdaChip = (c: DrugRowCells) => `<span class="chip ${CHIP_CLASS[c.fdaStatus]}">${esc(c.fda)}</span>`;
 
   const rows = landscape.drugs
     .map((d) => {
       const c = drugRowCells(d, fdaMap, rxcuiMap);
-      return `      <tr><td>${esc(c.name)}</td><td>${esc(c.phase)}</td><td class="num">${c.trials}</td><td>${fdaChip(c.fda)}</td><td>${esc(c.sponsor)}</td><td>${esc(c.aliases)}</td></tr>`;
+      return `      <tr><td>${esc(c.name)}</td><td>${esc(c.phase)}</td><td class="num">${c.trials}</td><td>${fdaChip(c)}</td><td>${esc(c.sponsor)}</td><td>${esc(c.aliases)}</td></tr>`;
     })
     .join('\n');
 
   return htmlShell(
     title,
     `<h1>${esc(title)}</h1>
-<p class="gen">Generated ${meta.generatedAt.toISOString().slice(0, 10)} from ClinicalTrials.gov, RxNorm and FDA (drugs@fda) public data.</p>
+<p class="gen">${generatedLine(meta)}</p>
 <p class="scope">${scope}</p>
-${landscape.excludedCount > 0 ? `<p class="excluded">${landscape.excludedCount} non-drug / unspecified intervention mentions excluded from the drug rollup.</p>\n` : ''}<p class="stats"><strong>${landscape.drugs.length} unique drugs</strong> — ${counts.join(', ')}.</p>
-${meta.phaseBuckets.length > 0 ? `<p class="phases">Trials by phase: ${meta.phaseBuckets.map((b) => `${esc(b.label)}: ${b.count}`).join(' · ')}.</p>\n` : ''}<table>
+${excluded ? `<p class="excluded">${excluded}</p>\n` : ''}<p class="stats">${statsLine(landscape, fdaMap, strong)}</p>
+${phases ? `<p class="phases">${phases}</p>\n` : ''}<table>
   <thead>
     <tr>${TABLE_HEADERS.map((h) => `<th${h === 'Trials' ? ' class="num"' : ''}>${h}</th>`).join('')}</tr>
   </thead>
@@ -304,14 +353,13 @@ export function buildTrialsMarkdownReport(trials: Trial[], meta: ReportMeta): st
   const lines: string[] = [];
   const pipe = (s: string) => s.replace(/\|/g, '\\|');
 
-  lines.push(`# Pipeline Radar — ${capitalize(meta.disease)} active clinical trials`);
+  lines.push(`# ${reportTitle(meta, 'trials')}`);
   lines.push('');
-  lines.push(`Generated ${meta.generatedAt.toISOString().slice(0, 10)} from ClinicalTrials.gov public data.`);
+  lines.push(generatedLine(meta, 'trials'));
   lines.push('');
   lines.push(scopeSentence(meta, (s) => `**${s}**`));
-  if (meta.phaseBuckets.length > 0) {
-    lines.push(`Trials by phase: ${meta.phaseBuckets.map((b) => `${b.label}: ${b.count}`).join(' · ')}.`);
-  }
+  const phases = phaseBucketsLine(meta);
+  if (phases) lines.push(phases);
   lines.push('');
 
   lines.push(`| ${TRIALS_TABLE_HEADERS.join(' | ')} |`);
@@ -332,8 +380,9 @@ export function buildTrialsMarkdownReport(trials: Trial[], meta: ReportMeta): st
 
 export function buildTrialsHtmlReport(trials: Trial[], meta: ReportMeta): string {
   const esc = escapeHtml;
-  const title = `Pipeline Radar — ${capitalize(meta.disease)} active clinical trials`;
+  const title = reportTitle(meta, 'trials');
   const scope = scopeSentence(meta, (s) => `<strong>${s}</strong>`, esc);
+  const phases = phaseBucketsLine(meta, esc);
 
   const rows = trials
     .map((t) => {
@@ -345,9 +394,9 @@ export function buildTrialsHtmlReport(trials: Trial[], meta: ReportMeta): string
   return htmlShell(
     title,
     `<h1>${esc(title)}</h1>
-<p class="gen">Generated ${meta.generatedAt.toISOString().slice(0, 10)} from ClinicalTrials.gov public data.</p>
+<p class="gen">${generatedLine(meta, 'trials')}</p>
 <p class="scope">${scope}</p>
-${meta.phaseBuckets.length > 0 ? `<p class="phases">Trials by phase: ${meta.phaseBuckets.map((b) => `${esc(b.label)}: ${b.count}`).join(' · ')}.</p>\n` : ''}<table>
+${phases ? `<p class="phases">${phases}</p>\n` : ''}<table>
   <thead>
     <tr>${TRIALS_TABLE_HEADERS.map((h) => `<th${h === 'Enrollment' ? ' class="num"' : ''}>${h}</th>`).join('')}</tr>
   </thead>
@@ -370,5 +419,12 @@ export function reportFilename(disease: string, date: Date, ext: ReportExt = 'md
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
   const suffix = kind === 'trials' ? '-trials' : '';
-  return `pipeline-radar-${slug || 'landscape'}${suffix}-${date.toISOString().slice(0, 10)}.${ext}`;
+  return `pipeline-radar-${slug || 'landscape'}${suffix}-${localDateStamp(date)}.${ext}`;
+}
+
+// Filename derived from the SAME meta the report body renders from — one clock
+// per export click, so the filename date can never disagree with the
+// "Generated" line inside the document.
+export function reportFilenameFor(meta: ReportMeta, ext: ReportExt, kind: ReportKind = 'landscape'): string {
+  return reportFilename(meta.disease, meta.generatedAt, ext, kind);
 }

@@ -80,6 +80,10 @@ export interface TrialFilters {
 export function filterTrials(trials: Trial[], filters: TrialFilters): Trial[] {
   const phases = filters.phases?.length ? new Set(filters.phases) : null;
   const statuses = filters.statuses?.length ? new Set(filters.statuses) : null;
+  // No active filters ⇒ return the INPUT array, not a copy: callers rely on
+  // reference equality to skip re-deriving (App reuses the filtered landscape
+  // as the unfiltered one in the common no-filter case).
+  if (!phases && !statuses) return trials;
   return trials.filter(
     (t) => (!phases || phases.has(highestPhase(t.phases))) && (!statuses || statuses.has(t.status)),
   );

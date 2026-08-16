@@ -76,6 +76,28 @@ describe('save/load roundtrip', () => {
     store.set(`watchlist:${diseaseKey('y')}`, JSON.stringify({ savedAt: 'nope', drugs: 3 }));
     expect(loadSnapshot('y')).toBeNull();
   });
+  it('returns null for parseable-but-partial snapshots — schema drift must never crash render', () => {
+    const base = snapshot([snap({ key: 'a' })]);
+    // Missing fetchedTrials (the field the differ and panel dereference).
+    const { fetchedTrials: _dropped, ...noDepth } = base;
+    store.set(`watchlist:${diseaseKey('z')}`, JSON.stringify(noDepth));
+    expect(loadSnapshot('z')).toBeNull();
+    // Empty-object drug entry (the classic partial write).
+    store.set(`watchlist:${diseaseKey('w')}`, JSON.stringify({ ...base, drugs: [{}] }));
+    expect(loadSnapshot('w')).toBeNull();
+    // Unknown fdaStatus value.
+    store.set(
+      `watchlist:${diseaseKey('v')}`,
+      JSON.stringify({ ...base, drugs: [{ ...base.drugs[0], fdaStatus: 'maybe' }] }),
+    );
+    expect(loadSnapshot('v')).toBeNull();
+    // Non-string nctIds.
+    store.set(
+      `watchlist:${diseaseKey('u')}`,
+      JSON.stringify({ ...base, drugs: [{ ...base.drugs[0], nctIds: [1, 2] }] }),
+    );
+    expect(loadSnapshot('u')).toBeNull();
+  });
 });
 
 describe('diffSnapshots', () => {
@@ -142,7 +164,18 @@ describe('diffSnapshots', () => {
     ]);
     const d = diffSnapshots(prev, cur);
     expect(d.fdaFlipped).toEqual([{ key: 'flip', displayName: 'flip' }]);
+    expect(d.fdaReversed).toHaveLength(0);
     expect(d.newlyResolved).toEqual([{ key: 'late', displayName: 'late', status: 'approved' }]);
+  });
+
+  it('reports approved→investigational as fdaReversed — a resolved-to-resolved change is never swallowed', () => {
+    const prev = snapshot([snap({ key: 'rev', fdaStatus: 'approved' })]);
+    const cur = snapshot([snap({ key: 'rev', fdaStatus: 'investigational' })]);
+    const d = diffSnapshots(prev, cur);
+    expect(d.fdaReversed).toEqual([{ key: 'rev', displayName: 'rev' }]);
+    expect(d.fdaFlipped).toHaveLength(0);
+    expect(d.newlyResolved).toHaveLength(0);
+    expect(d.hasChanges).toBe(true); // the "No changes" banner must not cover this
   });
 
   it('new-trial delta is a set difference, order-independent', () => {

@@ -3,7 +3,9 @@ import {
   buildMarkdownReport,
   buildTrialsHtmlReport,
   buildTrialsMarkdownReport,
+  localDateStamp,
   reportFilename,
+  reportFilenameFor,
   type ReportMeta,
 } from './report';
 import type { Landscape, DrugRow } from './drugs/cluster';
@@ -50,10 +52,14 @@ const rxcuiMap = new Map<string, string | null>([
   ['xy123', null], // definitive RxNorm miss while FDA still pending
 ]);
 
+// LOCAL noon, not a Z-suffixed string: dates are stamped in the user's local
+// calendar, so a UTC-midday fixture would shift by a day in far-east/west TZs.
+const FIXED_DATE = new Date(2026, 7, 14, 12, 0, 0);
+
 function meta(over: Partial<ReportMeta> = {}): ReportMeta {
   return {
     disease: 'lung cancer',
-    generatedAt: new Date('2026-08-14T12:00:00Z'),
+    generatedAt: FIXED_DATE,
     totalTrials: 6000,
     fetchedTrials: 1000,
     filteredTrials: 1000,
@@ -237,16 +243,31 @@ describe('trials report', () => {
 
 describe('reportFilename', () => {
   it('slugs the disease and stamps the date', () => {
-    expect(reportFilename('Non-Small Cell Lung Cancer!', new Date('2026-08-14T12:00:00Z'))).toBe(
+    expect(reportFilename('Non-Small Cell Lung Cancer!', FIXED_DATE)).toBe(
       'pipeline-radar-non-small-cell-lung-cancer-2026-08-14.md',
     );
   });
   it('falls back when the slug is empty', () => {
-    expect(reportFilename('!!!', new Date('2026-08-14T12:00:00Z'))).toBe('pipeline-radar-landscape-2026-08-14.md');
+    expect(reportFilename('!!!', FIXED_DATE)).toBe('pipeline-radar-landscape-2026-08-14.md');
   });
   it('stamps the requested extension', () => {
-    const d = new Date('2026-08-14T12:00:00Z');
-    expect(reportFilename('lung cancer', d, 'html')).toBe('pipeline-radar-lung-cancer-2026-08-14.html');
-    expect(reportFilename('lung cancer', d, 'pdf')).toBe('pipeline-radar-lung-cancer-2026-08-14.pdf');
+    expect(reportFilename('lung cancer', FIXED_DATE, 'html')).toBe('pipeline-radar-lung-cancer-2026-08-14.html');
+    expect(reportFilename('lung cancer', FIXED_DATE, 'pdf')).toBe('pipeline-radar-lung-cancer-2026-08-14.pdf');
+  });
+});
+
+describe('date stamping', () => {
+  it('localDateStamp uses the LOCAL calendar day, not the UTC one', () => {
+    // 11:30pm local on Aug 14: for any TZ west of UTC this instant is already
+    // Aug 15 in UTC — toISOString() would stamp tomorrow's date on the report.
+    const lateEvening = new Date(2026, 7, 14, 23, 30, 0);
+    expect(localDateStamp(lateEvening)).toBe('2026-08-14');
+  });
+  it('reportFilenameFor derives filename from the SAME meta the body renders from', () => {
+    const m = meta();
+    expect(reportFilenameFor(m, 'pdf')).toBe('pipeline-radar-lung-cancer-2026-08-14.pdf');
+    expect(reportFilenameFor(m, 'md', 'trials')).toBe('pipeline-radar-lung-cancer-trials-2026-08-14.md');
+    // The body's Generated line carries the same date as the filename.
+    expect(buildMarkdownReport(landscape, fdaMap, rxcuiMap, m)).toContain(`Generated ${localDateStamp(m.generatedAt)}`);
   });
 });

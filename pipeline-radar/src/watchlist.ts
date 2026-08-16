@@ -1,5 +1,5 @@
 import type { Landscape } from './drugs/cluster';
-import type { FdaBadge } from './drugs/openfda';
+import { fdaStatusOf, type FdaBadge, type FdaStatus } from './drugs/openfda';
 
 // Milestone 5: watchlist snapshot + diff. One snapshot per disease, stored in
 // localStorage; the differ is pure so it can be driven entirely by fixtures.
@@ -11,7 +11,7 @@ import type { FdaBadge } from './drugs/openfda';
 // fdaStatus keeps the codebase's three-way invariant: 'unknown' means the badge
 // had not resolved at save time — unknown is never a verdict and never a flip.
 
-export type FdaStatus = 'approved' | 'investigational' | 'unknown';
+export type { FdaStatus } from './drugs/openfda';
 
 export interface DrugSnap {
   key: string;
@@ -56,6 +56,10 @@ export interface LandscapeDiff {
   phaseAdvanced: PhaseChange[];
   phaseRegressed: PhaseChange[];
   fdaFlipped: { key: string; displayName: string }[];
+  // approved → investigational: the FDA record is no longer found. Usually a
+  // name-match shift rather than a real withdrawal, but the report's FDA column
+  // changed either way — never silently swallowed.
+  fdaReversed: { key: string; displayName: string }[];
   newlyResolved: { key: string; displayName: string; status: FdaStatus }[];
   newTrials: NewTrials[];
   caveats: string[];
@@ -83,7 +87,7 @@ export function makeSnapshot(
       phaseLabel: d.phaseLabel,
       trialCount: d.trialCount,
       nctIds: [...d.nctIds],
-      fdaStatus: !fdaMap.has(d.key) ? 'unknown' : fdaMap.get(d.key) ? 'approved' : 'investigational',
+      fdaStatus: fdaStatusOf(d.key, fdaMap),
     })),
   };
 }
@@ -96,13 +100,45 @@ export function saveSnapshot(s: Snapshot): void {
   }
 }
 
+const FDA_STATUSES = new Set<string>(['approved', 'investigational', 'unknown']);
+
+// Full-shape validation, not just "parses": the differ and the panel dereference
+// every one of these fields, so a partial write or schema drift that slipped
+// through would crash render on every future search of the disease. A snapshot
+// that fails ANY check is treated exactly like no watchlist.
+function isValidSnapshot(s: unknown): s is Snapshot {
+  if (typeof s !== 'object' || s === null) return false;
+  const o = s as Record<string, unknown>;
+  return (
+    typeof o.disease === 'string' &&
+    typeof o.savedAt === 'number' &&
+    typeof o.fetchedTrials === 'number' &&
+    typeof o.totalTrials === 'number' &&
+    Array.isArray(o.drugs) &&
+    o.drugs.every((d: unknown) => {
+      if (typeof d !== 'object' || d === null) return false;
+      const r = d as Record<string, unknown>;
+      return (
+        typeof r.key === 'string' &&
+        typeof r.displayName === 'string' &&
+        typeof r.maxPhase === 'number' &&
+        typeof r.phaseLabel === 'string' &&
+        typeof r.trialCount === 'number' &&
+        Array.isArray(r.nctIds) &&
+        r.nctIds.every((id: unknown) => typeof id === 'string') &&
+        typeof r.fdaStatus === 'string' &&
+        FDA_STATUSES.has(r.fdaStatus)
+      );
+    })
+  );
+}
+
 export function loadSnapshot(disease: string): Snapshot | null {
   try {
     const raw = localStorage.getItem(`watchlist:${diseaseKey(disease)}`);
     if (raw === null) return null;
-    const s = JSON.parse(raw) as Snapshot;
-    if (typeof s.savedAt !== 'number' || !Array.isArray(s.drugs)) return null;
-    return s;
+    const s: unknown = JSON.parse(raw);
+    return isValidSnapshot(s) ? s : null;
   } catch {
     return null; // corrupted entry or no localStorage — same as no watchlist
   }
@@ -164,6 +200,7 @@ export function diffSnapshots(prev: Snapshot, cur: Snapshot): LandscapeDiff {
   const phaseAdvanced: PhaseChange[] = [];
   const phaseRegressed: PhaseChange[] = [];
   const fdaFlipped: LandscapeDiff['fdaFlipped'] = [];
+  const fdaReversed: LandscapeDiff['fdaReversed'] = [];
   const newlyResolved: LandscapeDiff['newlyResolved'] = [];
   const newTrials: NewTrials[] = [];
 
@@ -173,8 +210,14 @@ export function diffSnapshots(prev: Snapshot, cur: Snapshot): LandscapeDiff {
     } else if (c.maxPhase < p.maxPhase) {
       phaseRegressed.push({ key: c.key, displayName: c.displayName, from: p.phaseLabel, to: c.phaseLabel });
     }
+    // FDA transitions: 'unknown' on either side is never a change (an unresolved
+    // badge is not a verdict), but BOTH resolved→resolved directions report —
+    // approved→investigational silently vanishing would let the deliverable's
+    // FDA column change under a "No changes" banner.
     if (p.fdaStatus === 'investigational' && c.fdaStatus === 'approved') {
       fdaFlipped.push({ key: c.key, displayName: c.displayName });
+    } else if (p.fdaStatus === 'approved' && c.fdaStatus === 'investigational') {
+      fdaReversed.push({ key: c.key, displayName: c.displayName });
     } else if (p.fdaStatus === 'unknown' && c.fdaStatus !== 'unknown') {
       newlyResolved.push({ key: c.key, displayName: c.displayName, status: c.fdaStatus });
     }
@@ -190,26 +233,20 @@ export function diffSnapshots(prev: Snapshot, cur: Snapshot): LandscapeDiff {
     );
   }
 
-  const hasChanges =
-    added.length > 0 ||
-    removed.length > 0 ||
-    renamed.length > 0 ||
-    phaseAdvanced.length > 0 ||
-    phaseRegressed.length > 0 ||
-    fdaFlipped.length > 0 ||
-    newlyResolved.length > 0 ||
-    newTrials.length > 0;
-
-  return {
+  // hasChanges is DERIVED from the category lists — a new category added above
+  // counts toward it by construction, never via a hand-maintained OR-chain.
+  const categories = {
     added,
     removed,
     renamed,
     phaseAdvanced,
     phaseRegressed,
     fdaFlipped,
+    fdaReversed,
     newlyResolved,
     newTrials,
-    caveats,
-    hasChanges,
   };
+  const hasChanges = Object.values(categories).some((list) => list.length > 0);
+
+  return { ...categories, caveats, hasChanges };
 }

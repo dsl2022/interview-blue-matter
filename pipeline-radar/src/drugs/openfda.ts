@@ -34,6 +34,17 @@ export interface Reaction {
   count: number;
 }
 
+// The three-way invariant in ONE place: key absent = pending/transport error
+// (never a verdict), null = definitive miss, badge = approved. Every consumer
+// (report cells, headline stats, watchlist snapshots, pending counters) must
+// classify through this helper so the states can't drift apart.
+export type FdaStatus = 'approved' | 'investigational' | 'unknown';
+
+export function fdaStatusOf(key: string, fdaMap: ReadonlyMap<string, FdaBadge | null>): FdaStatus {
+  if (!fdaMap.has(key)) return 'unknown';
+  return fdaMap.get(key) ? 'approved' : 'investigational';
+}
+
 const BASE = 'https://api.fda.gov/drug';
 const TTL_MS = 24 * 60 * 60 * 1000;
 

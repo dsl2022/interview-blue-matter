@@ -471,6 +471,11 @@ tr.expansion-row td {
   color: #9ca3af;
 }
 
+.export-error {
+  font-size: 0.78rem;
+  color: #b91c1c;
+}
+
 .diff-panel {
   background: #fff;
   border: 1px solid #e5e7eb;
