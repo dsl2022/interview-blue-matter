@@ -436,3 +436,221 @@ tr.expansion-row td {
   color: #92400e;
   font-size: 0.78rem;
 }
+
+/* Milestone 5: export bar + watchlist diff panel */
+.export-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.export-bar button {
+  font-size: 0.85rem;
+  padding: 0.35rem 0.9rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+}
+
+.export-bar button:hover {
+  border-color: #1a56db;
+  color: #1a56db;
+}
+
+.export-bar button.save-watchlist {
+  border-color: #1a56db;
+  color: #1a56db;
+}
+
+.export-pending {
+  font-size: 0.78rem;
+  color: #9ca3af;
+}
+
+.export-error {
+  font-size: 0.78rem;
+  color: #b91c1c;
+}
+
+.diff-panel {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-left: 3px solid #1a56db;
+  border-radius: 10px;
+  padding: 0.7rem 1rem 0.5rem;
+  margin-bottom: 1rem;
+  font-size: 0.86rem;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+}
+
+.diff-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0 0 0.35rem;
+}
+
+.diff-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #1a56db;
+}
+
+.diff-when {
+  color: #6b7280;
+  font-size: 0.78rem;
+}
+
+.diff-caveat {
+  margin: 0.25rem 0;
+  color: #92400e;
+  background: #fef3c7;
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
+}
+
+.diff-none {
+  margin: 0.2rem 0 0.45rem;
+  color: #374151;
+}
+
+.diff-sections {
+  display: flex;
+  flex-direction: column;
+}
+
+.diff-section {
+  border-top: 1px solid #f3f4f6;
+}
+
+.diff-section:first-child {
+  border-top: none;
+}
+
+.diff-section summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.1rem;
+  cursor: pointer;
+  list-style: none;
+  color: #1f2937;
+  user-select: none;
+}
+
+.diff-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.diff-section summary:hover {
+  background: #f9fafb;
+}
+
+.diff-section .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.tone-add .dot { background: #10b981; }
+.tone-up .dot { background: #3b82f6; }
+.tone-fda .dot { background: #047857; }
+.tone-trials .dot { background: #6366f1; }
+.tone-drop .dot { background: #ef4444; }
+.tone-muted .dot { background: #d1d5db; }
+
+.diff-section .count {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  min-width: 1.4ch;
+  text-align: right;
+}
+
+.diff-section .label {
+  color: #374151;
+}
+
+.tone-muted summary .count,
+.tone-muted summary .label {
+  color: #9ca3af;
+  font-weight: 500;
+}
+
+.diff-section .chev {
+  margin-left: auto;
+  color: #9ca3af;
+  font-size: 0.7rem;
+  transition: transform 0.12s ease;
+}
+
+.diff-section[open] .chev {
+  transform: rotate(90deg);
+}
+
+/* Expanded lists scroll past ~7 rows so a big delta never takes the page over. */
+.diff-section ul {
+  margin: 0 0 0.5rem;
+  padding: 0 0 0 1.15rem;
+  max-height: 200px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.diff-section li {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.22rem 0;
+  border-top: 1px dashed #f3f4f6;
+}
+
+.diff-section li:first-child {
+  border-top: none;
+}
+
+.diff-section li strong {
+  font-weight: 600;
+  color: #111827;
+}
+
+.li-detail {
+  color: #6b7280;
+  font-size: 0.8rem;
+}
+
+.nct-list a {
+  font-size: 0.78rem;
+}
+
+/* Milestone 5 (cut-line extra): browser print → PDF is the client handoff.
+   Hide the app chrome; the info line + drug table are the deliverable. */
+@media print {
+  .search,
+  .filters,
+  .view-toggle,
+  .load-more,
+  .export-bar,
+  .ae-toggle,
+  .diff-panel {
+    display: none !important;
+  }
+
+  th {
+    position: static; /* sticky headers repeat oddly across printed pages */
+  }
+
+  main {
+    max-width: none;
+    padding: 0;
+  }
+}

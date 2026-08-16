@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { fetchTrials } from './api';
 import { TrialsTable, type SortState } from './TrialsTable';
 import { FiltersBar, type FilterOption } from './FiltersBar';
@@ -6,15 +6,52 @@ import { SummaryPanel } from './SummaryPanel';
 import { DrugTable } from './DrugTable';
 import { buildDrugLandscape } from './drugs/cluster';
 import { enrichTopRows } from './drugs/rxnorm';
-import { badgeDrugs, type FdaBadge } from './drugs/openfda';
-import { filterTrials, sortTrials, mergeTrials, trialsByPhase, type SortKey } from './summarize';
+import { badgeDrugs, fdaStatusOf, type FdaBadge } from './drugs/openfda';
+import { filterTrials, sortTrials, mergeTrials, trialsByPhase, PHASE_LABELS, type SortKey } from './summarize';
 import { formatStatus } from './mapStudy';
+import {
+  buildHtmlReport,
+  buildMarkdownReport,
+  buildTrialsHtmlReport,
+  buildTrialsMarkdownReport,
+  reportFilenameFor,
+  type ReportMeta,
+} from './report';
+import { diffSnapshots, loadSnapshot, makeSnapshot, saveSnapshot, type Snapshot } from './watchlist';
+import { ExportBar } from './ExportBar';
+import { WatchlistDiff } from './WatchlistDiff';
 import type { Trial } from './types';
 import './App.css';
 
 // §5's page cap, re-denominated in TRIALS now that pages are 500 (M3 step 4);
 // past this, narrowing with filters is the honest tool.
 const MAX_TRIALS = 1000;
+
+// Enrichment callbacks fire synchronously per row for cached names; one
+// setState-with-full-Map-copy per row is O(n²) element copies on a replay over
+// a few hundred drugs. Buffer results and flush once per microtask instead —
+// one Map copy per flush, same streaming feel.
+function batchedMapWriter<V>(
+  set: Dispatch<SetStateAction<ReadonlyMap<string, V>>>,
+): (key: string, value: V) => void {
+  let buf: [string, V][] = [];
+  let scheduled = false;
+  return (key, value) => {
+    buf.push([key, value]);
+    if (scheduled) return;
+    scheduled = true;
+    queueMicrotask(() => {
+      scheduled = false;
+      const entries = buf;
+      buf = [];
+      set((prev) => {
+        const next = new Map(prev);
+        for (const [k, v] of entries) next.set(k, v);
+        return next;
+      });
+    });
+  };
+}
 
 type State =
   | { kind: 'idle' }
@@ -39,6 +76,9 @@ export default function App() {
   const [view, setView] = useState<'trials' | 'drugs'>('trials');
   const [rxcuiMap, setRxcuiMap] = useState<ReadonlyMap<string, string | null>>(new Map());
   const [fdaMap, setFdaMap] = useState<ReadonlyMap<string, FdaBadge | null>>(new Map());
+  // Last-saved watchlist snapshot for the current disease. localStorage isn't
+  // reactive, so the loaded snapshot lives in state: refreshed on search, on save.
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
 
   async function search() {
     const disease = query.trim();
@@ -57,6 +97,7 @@ export default function App() {
         nextPageToken: result.nextPageToken,
         pages: 1,
       });
+      setSnapshot(loadSnapshot(disease));
     } catch (err) {
       setState({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
     }
@@ -107,27 +148,112 @@ export default function App() {
   // Milestone 3: drug rollup is pure + derived — respects the active filters, no async.
   const landscape = useMemo(() => buildDrugLandscape(filtered), [filtered]);
 
-  // Enrichment streams in only while the drug view is open: RxNorm for the top
-  // rows, FDA badges for ALL rows (batching makes full coverage affordable —
-  // ~2 calls per 15 rows, DATA-RESEARCH §6.2). Module-level caches make
-  // re-runs (toggle, filter change) free for known names.
+  // Milestone 5: the watchlist snapshots the UNFILTERED landscape — a watchlist
+  // tracks the disease, filters are a viewing lens (diffing the filtered view
+  // would report every filter click as pipeline churn). In the common no-filter
+  // case filterTrials returns the input array itself, so the filtered landscape
+  // is reused instead of clustering the same trials twice.
+  const unfilteredLandscape = useMemo(
+    () => (filtered === allTrials ? landscape : buildDrugLandscape(allTrials)),
+    [filtered, allTrials, landscape],
+  );
+
+  // Enrichment streams in only while the drug view is open; module-level caches
+  // make re-runs (toggle, filter change) free for known names.
+  // RxNorm follows the VISIBLE (filtered) rows.
   useEffect(() => {
     if (view !== 'drugs' || landscape.drugs.length === 0) return;
     let cancelled = false;
-    enrichTopRows(
-      landscape.drugs,
-      (key, cui) => setRxcuiMap((prev) => new Map(prev).set(key, cui)),
-      { isCancelled: () => cancelled },
-    );
-    badgeDrugs(
-      landscape.drugs,
-      (key, badge) => setFdaMap((prev) => new Map(prev).set(key, badge)),
-      { isCancelled: () => cancelled },
-    );
+    enrichTopRows(landscape.drugs, batchedMapWriter(setRxcuiMap), { isCancelled: () => cancelled });
     return () => {
       cancelled = true;
     };
   }, [view, landscape]);
+
+  // FDA badges cover the UNFILTERED landscape (batching makes full coverage
+  // affordable — ~2 calls per 15 rows, DATA-RESEARCH §6.2): the watchlist
+  // snapshot and diff need every drug, and the emptiness guard checks THIS set,
+  // so zero-yield filters can never suppress the pass. Keyed on
+  // unfilteredLandscape, NOT landscape — a filter click must not cancel and
+  // replay a full badge pass.
+  useEffect(() => {
+    if (view !== 'drugs' || unfilteredLandscape.drugs.length === 0) return;
+    let cancelled = false;
+    badgeDrugs(unfilteredLandscape.drugs, batchedMapWriter(setFdaMap), { isCancelled: () => cancelled });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, unfilteredLandscape]);
+
+  // Filtered-view rows whose cluster key shifted under alias voting are absent
+  // from the unfiltered set — badge just those extras (usually zero rows, and
+  // cached canon names resolve without network, so filter-click replays are cheap).
+  useEffect(() => {
+    if (view !== 'drugs') return;
+    const unfilteredKeys = new Set(unfilteredLandscape.drugs.map((d) => d.key));
+    const extras = landscape.drugs.filter((d) => !unfilteredKeys.has(d.key));
+    if (extras.length === 0) return;
+    let cancelled = false;
+    badgeDrugs(extras, batchedMapWriter(setFdaMap), { isCancelled: () => cancelled });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, landscape, unfilteredLandscape]);
+
+  // Watchlist diff: recomputes as badges stream in — safe because 'unknown'
+  // never produces a false flip (watchlist.ts invariant).
+  const watchDiff = useMemo(() => {
+    if (!snapshot || state.kind !== 'results') return null;
+    const current = makeSnapshot(unfilteredLandscape, fdaMap, {
+      disease: state.disease,
+      savedAt: 0, // irrelevant to the diff
+      fetchedTrials: state.trials.length,
+      totalTrials: state.total,
+    });
+    return diffSnapshots(snapshot, current);
+  }, [snapshot, unfilteredLandscape, fdaMap, state]);
+
+  // Meta for the export renderers, built fresh at click time (all three formats
+  // share it). Only reachable from the drugs view, where results exist.
+  function currentReportMeta(): ReportMeta {
+    if (state.kind !== 'results') throw new Error('report meta requested outside results state');
+    return {
+      disease: state.disease,
+      generatedAt: new Date(),
+      totalTrials: state.total,
+      fetchedTrials: allTrials.length,
+      filteredTrials: filtered.length,
+      filters: {
+        phases: selectedPhases.map((p) => PHASE_LABELS[p] ?? p),
+        statuses: selectedStatuses.map(formatStatus),
+      },
+      phaseBuckets: trialsByPhase(filtered),
+    };
+  }
+
+  function saveWatchlist() {
+    if (state.kind !== 'results') return;
+    const fresh = makeSnapshot(unfilteredLandscape, fdaMap, {
+      disease: state.disease,
+      savedAt: Date.now(),
+      fetchedTrials: state.trials.length,
+      totalTrials: state.total,
+    });
+    saveSnapshot(fresh);
+    setSnapshot(fresh); // panel now diffs empty against itself → "No changes"
+  }
+
+  // Pending counter covers EVERY set an export or save can touch: the
+  // unfiltered landscape (what a watchlist save persists) plus the filtered one
+  // (what the exports render). Counting only visible rows let the warning read
+  // 0 while filter-hidden drugs were still streaming — and a save would then
+  // silently record them as unresolved.
+  const pendingCount = useMemo(() => {
+    const keys = new Set([...unfilteredLandscape.drugs, ...landscape.drugs].map((d) => d.key));
+    let n = 0;
+    for (const key of keys) if (fdaStatusOf(key, fdaMap) === 'unknown') n++;
+    return n;
+  }, [landscape, unfilteredLandscape, fdaMap]);
 
   // Filter chips are derived from the FETCHED set (with counts), never hardcoded.
   const phaseOptions: FilterOption[] = useMemo(
@@ -209,6 +335,21 @@ export default function App() {
           {view === 'trials' ? (
             <>
               <SummaryPanel trials={filtered} />
+              <ExportBar
+                buildMarkdown={() => {
+                  const meta = currentReportMeta();
+                  return { content: buildTrialsMarkdownReport(visible, meta), filename: reportFilenameFor(meta, 'md', 'trials') };
+                }}
+                buildHtml={() => {
+                  const meta = currentReportMeta();
+                  return { content: buildTrialsHtmlReport(visible, meta), filename: reportFilenameFor(meta, 'html', 'trials') };
+                }}
+                exportPdf={async () => {
+                  const { buildTrialsPdfReport } = await import('./pdfReport');
+                  const meta = currentReportMeta();
+                  buildTrialsPdfReport(visible, meta).save(reportFilenameFor(meta, 'pdf', 'trials'));
+                }}
+              />
               <TrialsTable trials={visible} sort={sort} onSort={onSort} />
             </>
           ) : (
@@ -219,6 +360,25 @@ export default function App() {
                   <> Excluded: {landscape.excludedCount} non-drug / unspecified interventions.</>
                 )}
               </p>
+              <ExportBar
+                buildMarkdown={() => {
+                  const meta = currentReportMeta();
+                  return { content: buildMarkdownReport(landscape, fdaMap, rxcuiMap, meta), filename: reportFilenameFor(meta, 'md') };
+                }}
+                buildHtml={() => {
+                  const meta = currentReportMeta();
+                  return { content: buildHtmlReport(landscape, fdaMap, rxcuiMap, meta), filename: reportFilenameFor(meta, 'html') };
+                }}
+                exportPdf={async () => {
+                  // jspdf loads on first click only — keeps it out of the app bundle.
+                  const { buildPdfReport } = await import('./pdfReport');
+                  const meta = currentReportMeta();
+                  buildPdfReport(landscape, fdaMap, rxcuiMap, meta).save(reportFilenameFor(meta, 'pdf'));
+                }}
+                onSaveWatchlist={saveWatchlist}
+                pendingCount={pendingCount}
+              />
+              {snapshot && watchDiff && <WatchlistDiff snapshot={snapshot} diff={watchDiff} />}
               <DrugTable drugs={landscape.drugs} rxcuiMap={rxcuiMap} fdaMap={fdaMap} />
             </>
           )}
