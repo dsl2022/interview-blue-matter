@@ -1,6 +1,14 @@
-import { buildMarkdownReport, reportFilename, type ReportMeta } from './report';
+import {
+  buildHtmlReport,
+  buildMarkdownReport,
+  buildTrialsHtmlReport,
+  buildTrialsMarkdownReport,
+  reportFilename,
+  type ReportMeta,
+} from './report';
 import type { Landscape, DrugRow } from './drugs/cluster';
 import type { FdaBadge } from './drugs/openfda';
+import type { Trial } from './types';
 
 function row(over: Partial<DrugRow> & { key: string; displayName: string }): DrugRow {
   return {
@@ -129,6 +137,104 @@ describe('buildMarkdownReport', () => {
   });
 });
 
+describe('buildHtmlReport', () => {
+  it('is a self-contained document with the same scope honesty as Markdown', () => {
+    const html = buildHtmlReport(landscape, fdaMap, rxcuiMap, meta());
+    expect(html).toContain('<!doctype html>');
+    expect(html).not.toMatch(/src=|href=/); // no external assets — attachable anywhere
+    expect(html).toContain('<strong>1,000 of 6,000</strong> active trials loaded');
+    expect(html).toContain('7 non-drug / unspecified intervention mentions excluded');
+  });
+
+  it('renders three numbers when filters are active', () => {
+    const html = buildHtmlReport(
+      landscape,
+      fdaMap,
+      rxcuiMap,
+      meta({ filteredTrials: 300, filters: { phases: ['Phase 3'], statuses: ['Recruiting'] } }),
+    );
+    expect(html).toContain('<strong>300</strong> trials matching filters (phase: Phase 3; status: Recruiting)');
+    expect(html).toContain('filtered from <strong>1,000 of 6,000</strong> active trials loaded');
+  });
+
+  it('keeps the FDA cell rules, pending separate from investigational', () => {
+    const html = buildHtmlReport(landscape, fdaMap, rxcuiMap, meta());
+    expect(html).toContain('<span class="chip approved">Approved 2014</span>');
+    expect(html).toContain('<span class="chip approved">Approved · records since 2004</span>');
+    expect(html).toContain('<span class="chip inv">Investigational</span>');
+    expect(html).toContain('<span class="chip pending">— (not in RxNorm · likely investigational)</span>');
+    expect(html).toContain('<strong>2</strong> FDA-approved, <strong>1</strong> investigational, <strong>1</strong> pending verification.');
+  });
+
+  it('entity-escapes free text so registry names cannot inject markup', () => {
+    const hostile = {
+      ...landscape,
+      drugs: [
+        row({ key: 'evil', displayName: '<script>alert(1)</script> & "co"', sponsors: ['A<B'] }),
+      ],
+    };
+    const html = buildHtmlReport(hostile, new Map(), new Map(), meta());
+    expect(html).not.toContain('<script>alert');
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt; &amp; &quot;co&quot;');
+    expect(html).toContain('A&lt;B');
+  });
+
+  it('is deterministic for a fixed generatedAt', () => {
+    const a = buildHtmlReport(landscape, fdaMap, rxcuiMap, meta());
+    const b = buildHtmlReport(landscape, fdaMap, rxcuiMap, meta());
+    expect(a).toBe(b);
+    expect(a).toContain('Generated 2026-08-14');
+  });
+});
+
+describe('trials report', () => {
+  const trial = (over: Partial<Trial> & { nctId: string }): Trial => ({
+    title: 'A Study of Something',
+    status: 'RECRUITING',
+    phases: ['PHASE2', 'PHASE3'],
+    enrollment: 1200,
+    sponsor: 'Merck Sharp & Dohme',
+    interventions: [{ type: 'DRUG', name: 'Pembrolizumab', otherNames: [] }],
+    ...over,
+  });
+
+  const trials: Trial[] = [
+    trial({ nctId: 'NCT00000001' }),
+    trial({
+      nctId: 'NCT00000002',
+      title: 'Weird | piped <b>title</b>',
+      enrollment: null,
+      phases: [],
+      interventions: [],
+    }),
+  ];
+
+  it('markdown mirrors the trials table columns with NCT links and the scope line', () => {
+    const md = buildTrialsMarkdownReport(trials, meta());
+    expect(md).toContain('# Pipeline Radar — Lung cancer active clinical trials');
+    expect(md).toContain('**1,000 of 6,000** active trials loaded');
+    expect(md).toContain(`| ${['NCT ID', 'Title', "What's tested", 'Sponsor', 'Phase', 'Status', 'Enrollment'].join(' | ')} |`);
+    expect(md).toContain('[NCT00000001](https://clinicaltrials.gov/study/NCT00000001)');
+    expect(md).toContain('| Phase 2, Phase 3 | Recruiting | 1,200 |');
+    // Null enrollment and empty phases/interventions render as dashes, pipes escaped.
+    expect(md).toContain('Weird \\| piped <b>title</b>');
+    expect(md).toContain('| N/A | Recruiting | — |');
+  });
+
+  it('html escapes free text and links each NCT id', () => {
+    const html = buildTrialsHtmlReport(trials, meta());
+    expect(html).toContain('<!doctype html>');
+    expect(html).toContain('<a href="https://clinicaltrials.gov/study/NCT00000002">NCT00000002</a>');
+    expect(html).toContain('Weird | piped &lt;b&gt;title&lt;/b&gt;');
+    expect(html).not.toContain('<b>title</b>');
+  });
+
+  it('is deterministic for a fixed generatedAt', () => {
+    expect(buildTrialsMarkdownReport(trials, meta())).toBe(buildTrialsMarkdownReport(trials, meta()));
+    expect(buildTrialsHtmlReport(trials, meta())).toBe(buildTrialsHtmlReport(trials, meta()));
+  });
+});
+
 describe('reportFilename', () => {
   it('slugs the disease and stamps the date', () => {
     expect(reportFilename('Non-Small Cell Lung Cancer!', new Date('2026-08-14T12:00:00Z'))).toBe(
@@ -137,5 +243,10 @@ describe('reportFilename', () => {
   });
   it('falls back when the slug is empty', () => {
     expect(reportFilename('!!!', new Date('2026-08-14T12:00:00Z'))).toBe('pipeline-radar-landscape-2026-08-14.md');
+  });
+  it('stamps the requested extension', () => {
+    const d = new Date('2026-08-14T12:00:00Z');
+    expect(reportFilename('lung cancer', d, 'html')).toBe('pipeline-radar-lung-cancer-2026-08-14.html');
+    expect(reportFilename('lung cancer', d, 'pdf')).toBe('pipeline-radar-lung-cancer-2026-08-14.pdf');
   });
 });

@@ -9,7 +9,14 @@ import { enrichTopRows } from './drugs/rxnorm';
 import { badgeDrugs, type FdaBadge } from './drugs/openfda';
 import { filterTrials, sortTrials, mergeTrials, trialsByPhase, PHASE_LABELS, type SortKey } from './summarize';
 import { formatStatus } from './mapStudy';
-import { buildMarkdownReport, reportFilename } from './report';
+import {
+  buildHtmlReport,
+  buildMarkdownReport,
+  buildTrialsHtmlReport,
+  buildTrialsMarkdownReport,
+  reportFilename,
+  type ReportMeta,
+} from './report';
 import { diffSnapshots, loadSnapshot, makeSnapshot, saveSnapshot, type Snapshot } from './watchlist';
 import { ExportBar } from './ExportBar';
 import { WatchlistDiff } from './WatchlistDiff';
@@ -159,6 +166,24 @@ export default function App() {
     return diffSnapshots(snapshot, current);
   }, [snapshot, unfilteredLandscape, fdaMap, state]);
 
+  // Meta for the export renderers, built fresh at click time (all three formats
+  // share it). Only reachable from the drugs view, where results exist.
+  function currentReportMeta(): ReportMeta {
+    if (state.kind !== 'results') throw new Error('report meta requested outside results state');
+    return {
+      disease: state.disease,
+      generatedAt: new Date(),
+      totalTrials: state.total,
+      fetchedTrials: allTrials.length,
+      filteredTrials: filtered.length,
+      filters: {
+        phases: selectedPhases.map((p) => PHASE_LABELS[p] ?? p),
+        statuses: selectedStatuses.map(formatStatus),
+      },
+      phaseBuckets: trialsByPhase(filtered),
+    };
+  }
+
   function saveWatchlist() {
     if (state.kind !== 'results') return;
     const fresh = makeSnapshot(unfilteredLandscape, fdaMap, {
@@ -251,6 +276,17 @@ export default function App() {
           {view === 'trials' ? (
             <>
               <SummaryPanel trials={filtered} />
+              <ExportBar
+                buildMarkdown={() => buildTrialsMarkdownReport(visible, currentReportMeta())}
+                buildHtml={() => buildTrialsHtmlReport(visible, currentReportMeta())}
+                exportPdf={async () => {
+                  const { buildTrialsPdfReport } = await import('./pdfReport');
+                  buildTrialsPdfReport(visible, currentReportMeta()).save(
+                    reportFilename(state.disease, new Date(), 'pdf', 'trials'),
+                  );
+                }}
+                filename={(ext) => reportFilename(state.disease, new Date(), ext, 'trials')}
+              />
               <TrialsTable trials={visible} sort={sort} onSort={onSort} />
             </>
           ) : (
@@ -262,21 +298,16 @@ export default function App() {
                 )}
               </p>
               <ExportBar
-                buildReport={() =>
-                  buildMarkdownReport(landscape, fdaMap, rxcuiMap, {
-                    disease: state.disease,
-                    generatedAt: new Date(),
-                    totalTrials: state.total,
-                    fetchedTrials: allTrials.length,
-                    filteredTrials: filtered.length,
-                    filters: {
-                      phases: selectedPhases.map((p) => PHASE_LABELS[p] ?? p),
-                      statuses: selectedStatuses.map(formatStatus),
-                    },
-                    phaseBuckets: trialsByPhase(filtered),
-                  })
-                }
-                filename={() => reportFilename(state.disease, new Date())}
+                buildMarkdown={() => buildMarkdownReport(landscape, fdaMap, rxcuiMap, currentReportMeta())}
+                buildHtml={() => buildHtmlReport(landscape, fdaMap, rxcuiMap, currentReportMeta())}
+                exportPdf={async () => {
+                  // jspdf loads on first click only — keeps it out of the app bundle.
+                  const { buildPdfReport } = await import('./pdfReport');
+                  buildPdfReport(landscape, fdaMap, rxcuiMap, currentReportMeta()).save(
+                    reportFilename(state.disease, new Date(), 'pdf'),
+                  );
+                }}
+                filename={(ext) => reportFilename(state.disease, new Date(), ext)}
                 onSaveWatchlist={saveWatchlist}
                 pendingCount={landscape.drugs.filter((d) => !fdaMap.has(d.key)).length}
               />
