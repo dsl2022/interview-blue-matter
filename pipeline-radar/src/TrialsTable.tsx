@@ -1,18 +1,52 @@
 import type { Trial } from './types';
 import { formatPhases, formatStatus } from './mapStudy';
+import type { SortKey, SortDir } from './summarize';
 
-export function TrialsTable({ trials }: { trials: Trial[] }) {
+export interface SortState {
+  key: SortKey;
+  dir: SortDir;
+}
+
+const COLUMNS: { label: string; sortKey?: SortKey; className?: string }[] = [
+  { label: 'NCT ID' },
+  { label: 'Title' },
+  { label: "What's tested" },
+  { label: 'Sponsor', sortKey: 'sponsor' },
+  { label: 'Phase', sortKey: 'phase' },
+  { label: 'Status', sortKey: 'status' },
+  { label: 'Enrollment', sortKey: 'enrollment', className: 'num' },
+];
+
+export function TrialsTable({
+  trials,
+  sort,
+  onSort,
+}: {
+  trials: Trial[];
+  sort: SortState | null;
+  onSort: (key: SortKey) => void;
+}) {
   return (
     <table>
       <thead>
         <tr>
-          <th>NCT ID</th>
-          <th>Title</th>
-          <th>What's tested</th>
-          <th>Sponsor</th>
-          <th>Phase</th>
-          <th>Status</th>
-          <th>Enrollment</th>
+          {COLUMNS.map((c) =>
+            c.sortKey ? (
+              <th
+                key={c.label}
+                className={`sortable ${c.className ?? ''}`}
+                onClick={() => onSort(c.sortKey!)}
+                title="Sorts the fetched pages only"
+              >
+                {c.label}
+                <span className="sort-ind">{sort?.key === c.sortKey ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</span>
+              </th>
+            ) : (
+              <th key={c.label} className={c.className}>
+                {c.label}
+              </th>
+            ),
+          )}
         </tr>
       </thead>
       <tbody>
