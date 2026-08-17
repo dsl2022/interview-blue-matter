@@ -1,0 +1,48 @@
+# Deploy on push to main: the CI gate first, then cdk deploy via GitHub OIDC —
+# no stored AWS keys anywhere (CICD-PLAN.md "Auth"). AWS_DEPLOY_ROLE_ARN is a
+# repo *variable* holding the role ARN output by the GithubOidcStack.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false # queue deploys, never run two at once
+
+permissions:
+  id-token: write # OIDC token for configure-aws-credentials
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            pipeline-radar/package-lock.json
+            cdk/package-lock.json
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+      - name: Build frontend
+        working-directory: pipeline-radar
+        run: npm ci && npm run build
+      - name: Show infra diff (log only)
+        working-directory: cdk
+        run: npm ci && npx cdk diff PipelineRadarApi PipelineRadarWeb || true
+      - name: Deploy
+        working-directory: cdk
+        # App stacks only — the OIDC stack is deployed once, manually, and the
+        # deploy role deliberately shouldn't be able to rewrite its own trust.
+        run: npx cdk deploy PipelineRadarApi PipelineRadarWeb --require-approval never

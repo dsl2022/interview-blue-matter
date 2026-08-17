@@ -36,11 +36,12 @@ src/
 - `interventions[]`: keep `{type, name}`; every field defensively optional
 
 ### Drug rollup (milestone 3 — the judged part)
-1. Take interventions where `type ∈ {DRUG, BIOLOGICAL}` only (sample shows RADIATION etc.)
-2. Cheap local cleanup first: lowercase, trim, strip dose/route suffixes ("pembrolizumab 200mg IV" → "pembrolizumab"), split combos on `+` / " and "
-3. Group by cleaned name → then RxNorm (exact, then fuzzy) **only on the unique names**, cached, to merge synonyms under one RxCUI
-4. RxNorm miss (new research codes) → keep as its own row, flag "unverified"
-5. Per drug: most advanced phase via rank map `NA < EARLY_PHASE1 < PH1 < PH1/2 < PH2 < PH2/3 < PH3 < PH4`, trial count, distinct sponsors
+
+> **SUPERSEDED by `MILESTONE-3-PLAN.md`** (backed by measured data in `research/DATA-RESEARCH.md`;
+> implemented in `src/drugs/`). Key deltas from the sketch below: alias VOTING over trial
+> `otherNames` with ambiguity/count guards replaces plain group-by (naive merging fused 174
+> drugs); RxNorm is exact-only with `allsrc=1` — fuzzy is banned (measured unusable); phase
+> rank reuses `summarize.ts` (`PH1/2` combo strings don't exist in API v2).
 
 ### Phase/status display maps
 `PHASE3` → "Phase 3", `ACTIVE_NOT_RECRUITING` → "Active, not recruiting", etc. One const object, used by table, filters, and chart axes.
